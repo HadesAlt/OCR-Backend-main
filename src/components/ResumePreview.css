@@ -1,0 +1,344 @@
+/* Container */
+.preview-container {
+  padding: 40px 20px;
+  background: #0f1419;
+  min-height: 100vh;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 30px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  flex-wrap: wrap;
+}
+
+.font-size-control {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 15px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+}
+
+.font-size-control label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e0e0e0;
+  min-width: 110px;
+}
+
+.size-btn {
+  padding: 8px 16px;
+  border: 1.5px solid rgba(102, 126, 234, 0.4);
+  border-radius: 6px;
+  background: rgba(102, 126, 234, 0.1);
+  color: #667eea;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 700;
+  transition: all 0.3s;
+}
+
+.size-btn:hover {
+  background: #667eea;
+  color: white;
+  border-color: #667eea;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+}
+
+.edit-btn,
+.export-btn {
+  padding: 12px 30px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: all 0.3s;
+}
+
+.edit-btn {
+  background: rgba(108, 117, 125, 0.2);
+  color: #a0a0a0;
+  border: 1.5px solid rgba(108, 117, 125, 0.4);
+}
+
+.edit-btn:hover {
+  background: rgba(108, 117, 125, 0.3);
+  color: #ffffff;
+  border-color: #6c757d;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(108, 117, 125, 0.3);
+}
+
+.export-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.export-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(102, 126, 234, 0.6);
+}
+
+/* EXACT A4 Page - Matches Google Docs Export */
+.resume-preview {
+  width: 595pt; /* A4 width in points */
+  padding: 72pt;
+  background: #ffffff;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+  font-family: 'Calibri', Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.0;
+  color: #000000;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+/* Header - Name LEFT, Contact RIGHT on same line */
+.resume-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12pt;
+  border-bottom: 1pt solid #000;
+  padding-bottom: 4pt;
+}
+
+.resume-name {
+  font-size: 20pt;
+  font-weight: bold;
+  font-family: 'Calibri', sans-serif;
+  color: #000000;
+  margin: 0;
+  padding-top: 4.5pt;
+  line-height: 1.0;
+  text-indent: 7pt;
+}
+
+.resume-contact {
+  font-size: 10pt;
+  font-family: 'Calibri', sans-serif;
+  color: #000000;
+  text-align: right;
+  padding-top: 4.5pt;
+  line-height: 1.2;
+  margin-right: 5.6pt;
+}
+
+.resume-contact a {
+  color: #1155cc;
+  text-decoration: underline;
+  text-decoration-skip-ink: none;
+  -webkit-text-decoration-skip: none;
+}
+
+.resume-contact span {
+  color: #000;
+}
+
+/* ALL Tables */
+.resume-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 8pt;
+  margin-top: 0;
+  border-spacing: 0;
+}
+
+.resume-table th,
+.resume-table td {
+  border: 1pt solid #a6a6a6;
+  padding: 0pt 5.4pt;
+  vertical-align: top;
+}
+
+/* Section Title Headers (BLUE background, WHITE text) */
+.resume-table thead th.section-title {
+  background-color: #1f487c;
+  color: #ffffff;
+  font-weight: bold;
+  font-size: 10pt;
+  font-family: 'Calibri', sans-serif;
+  text-align: left;
+  padding: 2pt 5.4pt;
+  line-height: 1.0;
+}
+
+/* Skills Section - Same Blue as Others */
+.resume-table thead th.section-title.blue-bg {
+  background-color: #1f487c;
+}
+
+/* Education Table - Sub-headers */
+.education-table thead th {
+  background-color: #d9d9d9;
+  color: #000000;
+  font-weight: bold;
+  font-size: 9pt;
+  font-family: 'Calibri', sans-serif;
+  text-align: center;
+  vertical-align: middle;
+  padding: 2pt 5.4pt;
+  line-height: 1.0;
+}
+
+.education-table tbody td {
+  font-size: 9pt;
+  font-family: 'Calibri', sans-serif;
+  text-align: center;
+  line-height: 1.0;
+  padding: 2pt 5.4pt;
+}
+
+/* Two-Column Tables (Internship, Positions) */
+.two-column-table tbody tr td.title-cell {
+  width: 29%;
+  background-color: #ececec;
+  font-size: 9pt;
+  font-family: 'Calibri', sans-serif;
+  text-align: center;
+  vertical-align: middle;
+  padding: 4pt 5.8pt;
+  line-height: 1.1;
+}
+
+.two-column-table .title-cell strong {
+  font-weight: bold;
+  font-size: 9pt;
+}
+
+.two-column-table tbody tr td.description-cell {
+  width: 71%;
+  font-size: 9pt;
+  font-family: 'Calibri', sans-serif;
+  text-align: justify;
+  vertical-align: top;
+  padding: 2pt 5.4pt;
+  line-height: 1.2;
+}
+
+.two-column-table .description-cell p {
+  margin: 0;
+  padding: 0;
+}
+
+.two-column-table .description-cell p:first-child {
+  margin-top: 0;
+}
+
+.two-column-table .description-cell ul {
+  margin: 0;
+  padding: 0;
+  padding-left: 6pt;
+  list-style-type: disc;
+  font-family: 'Calibri', sans-serif;
+  font-size: 9pt;
+}
+
+.two-column-table .description-cell ul:first-child {
+  margin-top: 0;
+}
+
+.two-column-table .description-cell li {
+  margin-left: 0;
+  padding-left: 0;
+  line-height: 1.2;
+  text-align: justify;
+  font-family: 'Calibri', sans-serif;
+  font-size: 9pt;
+}
+
+.two-column-table .description-cell strong {
+  font-weight: bold;
+  font-family: 'Calibri', sans-serif;
+}
+
+/* Single Column Tables (Extra-Curriculars, Academic, Skills) */
+.single-column-table tbody td {
+  font-size: 9pt;
+  font-family: 'Calibri', sans-serif;
+  text-align: left;
+  padding: 2pt 5.4pt;
+  line-height: 1.2;
+}
+
+.single-column-table tbody td p {
+  margin: 0;
+  padding: 0;
+}
+
+.single-column-table tbody td p:first-child {
+  margin-top: 0;
+}
+
+.single-column-table tbody td ul {
+  margin: 0;
+  padding: 0;
+  padding-left: 6pt;
+  list-style-type: disc;
+  font-family: 'Calibri', sans-serif;
+  font-size: 9pt;
+}
+
+.single-column-table tbody td ul:first-child {
+  margin-top: 0;
+}
+
+.single-column-table tbody td li {
+  margin-left: 0;
+  padding-left: 0;
+  line-height: 1.2;
+  text-align: left;
+  font-family: 'Calibri', sans-serif;
+  font-size: 9pt;
+}
+
+.single-column-table tbody td strong {
+  font-weight: bold;
+  font-family: 'Calibri', sans-serif;
+}
+
+/* Skills Section - Sub-headers */
+.skills-subheader {
+  font-size: 10pt;
+  font-weight: bold;
+  font-family: 'Calibri', sans-serif;
+  margin: 0;
+  padding: 0;
+  line-height: 1.0;
+}
+
+/* Print Styles */
+@media print {
+  .preview-container {
+    padding: 0;
+    background: white;
+  }
+
+  .preview-actions {
+    display: none;
+  }
+
+  .resume-preview {
+    box-shadow: none;
+    margin: 0;
+    padding: 72pt;
+  }
+}
+
+@page {
+  size: A4;
+  margin: 0;
+}
