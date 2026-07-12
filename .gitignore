@@ -28,3 +28,14 @@ yarn-error.log*
 *.swo
 *~
 
+.vercel
+
+# Gmail OAuth (local)
+credentials.json
+token.json
+
+# Extracted customer PII (license migration)
+extracted_licenses.json
+extract_licenses.cjs
+
+.vercel

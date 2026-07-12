@@ -1,0 +1,24 @@
+{
+  "name": "resume-ocr-server",
+  "version": "2.0.0",
+  "description": "Resume Builder backend — OCR, license management, UPI payment via Gmail verification; Telegram notify-only",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "grant-license": "node scripts/grant-license.js",
+    "gmail-oauth": "node scripts/gmail-oauth-token.js",
+    "seed-old-licenses": "node scripts/seed_old_licenses.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "googleapis": "^105.0.0",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.3.0",
+    "helmet": "^8.1.0",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.22.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "resend": "^3.2.0"
+  }
+}

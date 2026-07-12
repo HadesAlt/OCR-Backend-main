@@ -1,0 +1,15 @@
+node_modules/
+uploads/
+output/
+*.log
+.env
+licenses.db
+gmail-credentials.json
+gmail-token.json
+credentials.json
+token.json
+token.*.json
+licenses.db-shm
+licenses.db-wal
+licenses.json
+extracted_licenses.json
