@@ -8,18 +8,18 @@
  * /activate and enter their key again.
  *
  * Usage:
- *   set MYSQL_URL=mysql://user:pass@host:port/db   (PowerShell: $env:MYSQL_URL="...")
+ *   $env:DATABASE_URL="postgres://user:pass@host:port/db"   (PowerShell)
  *   node scripts/seed_old_licenses.js path/to/extracted_licenses.json
  */
 
 const fs = require('fs');
 const path = require('path');
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 
 async function main() {
-  const mysqlUrl = (process.env.MYSQL_URL || '').trim();
-  if (!mysqlUrl) {
-    console.error('MYSQL_URL env var is required.');
+  const connectionString = (process.env.DATABASE_URL || '').trim();
+  if (!connectionString) {
+    console.error('DATABASE_URL env var is required.');
     process.exit(1);
   }
 
@@ -35,31 +35,25 @@ async function main() {
   const entries = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
   console.log(`Loaded ${entries.length} license entries from ${jsonPath}`);
 
-  const u = new URL(mysqlUrl);
-  const pool = mysql.createPool({
-    host: u.hostname,
-    port: u.port ? Number(u.port) : 3306,
-    user: decodeURIComponent(u.username || ''),
-    password: decodeURIComponent(u.password || ''),
-    database: u.pathname.replace(/^\//, ''),
-    waitForConnections: true,
-    connectionLimit: 5,
+  const pool = new Pool({
+    connectionString,
+    ssl: /localhost|127\.0\.0\.1/.test(connectionString) ? false : { rejectUnauthorized: false },
+    max: 5,
   });
 
   // Make sure the table exists (same DDL as database.js).
   await pool.query(`
     CREATE TABLE IF NOT EXISTS licenses (
-      \`licenseKey\` VARCHAR(64) NOT NULL PRIMARY KEY,
-      \`upiRef\` VARCHAR(255) NOT NULL,
-      \`amount\` DOUBLE NOT NULL,
-      \`fromName\` VARCHAR(512) NULL,
-      \`vpa\` VARCHAR(512) NULL,
-      \`issuedAt\` VARCHAR(64) NOT NULL,
-      \`deviceFingerprint\` VARCHAR(64) NULL,
-      \`activatedAt\` VARCHAR(64) NULL,
-      \`active\` TINYINT(1) NOT NULL DEFAULT 1,
-      UNIQUE KEY \`idx_upiRef\` (\`upiRef\`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+      "licenseKey" VARCHAR(64) PRIMARY KEY,
+      "upiRef" VARCHAR(255) NOT NULL UNIQUE,
+      "amount" DOUBLE PRECISION NOT NULL,
+      "fromName" VARCHAR(512),
+      "vpa" VARCHAR(512),
+      "issuedAt" VARCHAR(64) NOT NULL,
+      "deviceFingerprint" VARCHAR(64),
+      "activatedAt" VARCHAR(64),
+      "active" SMALLINT NOT NULL DEFAULT 1
+    )`);
 
   let inserted = 0;
   let skipped = 0;
@@ -72,12 +66,13 @@ async function main() {
 
     const upiRef = `LEGACY-${licenseKey}`;
     try {
-      const [r] = await pool.execute(
-        `INSERT IGNORE INTO licenses (licenseKey, upiRef, amount, fromName, vpa, issuedAt, deviceFingerprint, activatedAt, active)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 1)`,
+      const r = await pool.query(
+        `INSERT INTO licenses ("licenseKey", "upiRef", "amount", "fromName", "vpa", "issuedAt", "deviceFingerprint", "activatedAt", "active")
+         VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, 1)
+         ON CONFLICT ("licenseKey") DO NOTHING`,
         [licenseKey, upiRef, 49, null, email, now],
       );
-      if (r.affectedRows > 0) inserted++; else skipped++;
+      if (r.rowCount > 0) inserted++; else skipped++;
     } catch (e) {
       console.error('Failed to insert', licenseKey, email, e.message);
       skipped++;

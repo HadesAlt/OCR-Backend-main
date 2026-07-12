@@ -1,6 +1,4 @@
-const mysql = require('mysql2/promise');
-
-const MYSQL_URL = 'mysql://root:FQlhdeRNbhQRevEOIogJJBPwEOqeJvEw@crossover.proxy.rlwy.net:36637/railway';
+const { Pool } = require('pg');
 
 function generateLicenseKey() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -9,24 +7,25 @@ function generateLicenseKey() {
 }
 
 async function main() {
-  const u = new URL(MYSQL_URL);
-  const pool = mysql.createPool({
-    host: u.hostname,
-    port: Number(u.port),
-    user: decodeURIComponent(u.username),
-    password: decodeURIComponent(u.password),
-    database: u.pathname.replace(/^\//, ''),
-    waitForConnections: true,
-    connectionLimit: 3,
+  const connectionString = (process.env.DATABASE_URL || '').trim();
+  if (!connectionString) {
+    console.error('DATABASE_URL env var is required.');
+    process.exit(1);
+  }
+  const pool = new Pool({
+    connectionString,
+    ssl: /localhost|127\.0\.0\.1/.test(connectionString) ? false : { rejectUnauthorized: false },
+    max: 3,
   });
 
   const licenseKey = generateLicenseKey();
   const now = new Date().toISOString();
   const upiRef = 'MANUAL-ADMIN-' + Date.now();
 
-  const [r] = await pool.execute(
-    `INSERT IGNORE INTO licenses (licenseKey, upiRef, amount, fromName, vpa, issuedAt, deviceFingerprint, activatedAt, active)
-     VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 1)`,
+  const r = await pool.query(
+    `INSERT INTO licenses ("licenseKey", "upiRef", "amount", "fromName", "vpa", "issuedAt", "deviceFingerprint", "activatedAt", "active")
+     VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, 1)
+     ON CONFLICT ("licenseKey") DO NOTHING`,
     [licenseKey, upiRef, 49, 'Gurnoor Singh (Admin)', 'admin@manual', now]
   );
 
@@ -35,7 +34,7 @@ async function main() {
   console.log('');
   console.log('  ' + licenseKey);
   console.log('');
-  console.log('  Rows inserted : ' + r.affectedRows);
+  console.log('  Rows inserted : ' + r.rowCount);
   console.log('  Issued at     : ' + now);
   console.log('  UPI Ref       : ' + upiRef);
 
