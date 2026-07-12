@@ -38,4 +38,9 @@ token.json
 extracted_licenses.json
 extract_licenses.cjs
 
+# Sample/customer resume files (should never be committed)
+*.pdf
+*.docx
+GurnoorSingh.html
+
 .vercel
