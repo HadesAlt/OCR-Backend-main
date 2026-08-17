@@ -52,6 +52,29 @@ CREATE TABLE IF NOT EXISTS payment_routes (
   "updatedAt" VARCHAR(64) NOT NULL
 )`;
 
+const PG_USERS = `
+CREATE TABLE IF NOT EXISTS users (
+  "id" VARCHAR(64) PRIMARY KEY,
+  "email" VARCHAR(255) NOT NULL UNIQUE,
+  "name" VARCHAR(255),
+  "picture" TEXT,
+  "authProvider" VARCHAR(32) NOT NULL DEFAULT 'google',
+  "planType" VARCHAR(32) NOT NULL DEFAULT 'free',
+  "licenseKey" VARCHAR(64),
+  "resumesCreated" INT NOT NULL DEFAULT 0,
+  "maxResumes" INT NOT NULL DEFAULT 2,
+  "createdAt" VARCHAR(64) NOT NULL,
+  "expiresAt" VARCHAR(64),
+  "status" VARCHAR(32) NOT NULL DEFAULT 'active',
+  "lastLoginAt" VARCHAR(64)
+)`;
+
+const PG_SYSTEM_SETTINGS = `
+CREATE TABLE IF NOT EXISTS system_settings (
+  "key" VARCHAR(64) PRIMARY KEY,
+  "value" TEXT NOT NULL
+)`;
+
 async function initPg(connectionUrl) {
   const useSsl = !/localhost|127\.0\.0\.1/.test(connectionUrl);
   pool = new Pool({
@@ -62,9 +85,13 @@ async function initPg(connectionUrl) {
   await pool.query(PG_LICENSES);
   await pool.query(PG_PENDING);
   await pool.query(PG_PAYMENT_ROUTES);
+  await pool.query(PG_USERS);
+  await pool.query(PG_SYSTEM_SETTINGS);
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS "telegramBroadcasts" TEXT`);
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS "paymentRoute" VARCHAR(64)`);
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS "paymentAccountEmail" VARCHAR(255)`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "resumesCreated" INT NOT NULL DEFAULT 0`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "maxResumes" INT NOT NULL DEFAULT 2`);
 
   const now = new Date().toISOString();
   await pool.query(
@@ -294,11 +321,107 @@ async function setRouteActive(routeKey, enabled) {
   );
 }
 
-async function setRouteQrImagePath(routeKey, qrImagePath) {
+async function insertUser(user) {
   await pool.query(
-    'UPDATE payment_routes SET "qrImagePath" = $1, "updatedAt" = $2 WHERE "routeKey" = $3',
-    [qrImagePath || null, new Date().toISOString(), routeKey],
+    `INSERT INTO users ("id", "email", "name", "picture", "authProvider", "planType", "licenseKey", "resumesCreated", "maxResumes", "createdAt", "expiresAt", "status", "lastLoginAt")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [
+      user.id,
+      user.email,
+      user.name || null,
+      user.picture || null,
+      user.authProvider || 'google',
+      user.planType || 'free',
+      user.licenseKey || null,
+      user.resumesCreated || 0,
+      user.maxResumes || 2,
+      user.createdAt,
+      user.expiresAt || null,
+      user.status || 'active',
+      user.lastLoginAt || null,
+    ],
   );
+}
+
+async function findUserByEmail(email) {
+  const { rows } = await pool.query('SELECT * FROM users WHERE LOWER("email") = LOWER($1) LIMIT 1', [email]);
+  return rows[0] || null;
+}
+
+async function findUserById(id) {
+  const { rows } = await pool.query('SELECT * FROM users WHERE "id" = $1 LIMIT 1', [id]);
+  return rows[0] || null;
+}
+
+async function findUserByLicense(licenseKey) {
+  const { rows } = await pool.query('SELECT * FROM users WHERE "licenseKey" = $1 LIMIT 1', [licenseKey]);
+  return rows[0] || null;
+}
+
+async function updateUserLogin(id, name, picture, lastLoginAt) {
+  await pool.query(
+    'UPDATE users SET "lastLoginAt" = $1, "name" = COALESCE($2, "name"), "picture" = COALESCE($3, "picture") WHERE "id" = $4',
+    [lastLoginAt, name, picture, id],
+  );
+}
+
+async function incrementUserResume(id) {
+  await pool.query('UPDATE users SET "resumesCreated" = "resumesCreated" + 1 WHERE "id" = $1', [id]);
+}
+
+async function setUserStatus(id, status) {
+  await pool.query('UPDATE users SET "status" = $1 WHERE "id" = $2', [status, id]);
+}
+
+async function upgradeUserLifetime(id) {
+  await pool.query('UPDATE users SET "planType" = \'lifetime\', "expiresAt" = NULL, "status" = \'active\' WHERE "id" = $1', [id]);
+}
+
+async function adjustUserResumeLimit(id, resumesCreated, maxResumes) {
+  await pool.query(
+    'UPDATE users SET "resumesCreated" = COALESCE($1, "resumesCreated"), "maxResumes" = COALESCE($2, "maxResumes") WHERE "id" = $3',
+    [resumesCreated, maxResumes, id],
+  );
+}
+
+async function deleteUser(id) {
+  await pool.query('DELETE FROM users WHERE "id" = $1', [id]);
+}
+
+async function getAllUsers() {
+  const { rows } = await pool.query('SELECT * FROM users ORDER BY "createdAt" DESC');
+  return rows;
+}
+
+async function getAllLicenses() {
+  const { rows } = await pool.query('SELECT * FROM licenses ORDER BY "issuedAt" DESC');
+  return rows;
+}
+
+async function getAllPending() {
+  const { rows } = await pool.query('SELECT * FROM pending_payments ORDER BY "createdAt" DESC');
+  return rows;
+}
+
+async function getSetting(key, defaultVal) {
+  try {
+    const { rows } = await pool.query('SELECT "value" FROM system_settings WHERE "key" = $1 LIMIT 1', [key]);
+    return rows[0] ? rows[0].value : defaultVal;
+  } catch {
+    return defaultVal;
+  }
+}
+
+async function setSetting(key, value) {
+  try {
+    await pool.query(
+      `INSERT INTO system_settings ("key", "value") VALUES ($1, $2)
+       ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value"`,
+      [key, String(value)],
+    );
+  } catch (e) {
+    console.error('Error setting value in DB:', e.message);
+  }
 }
 
 module.exports = {
@@ -326,4 +449,19 @@ module.exports = {
   setRouteManualVerification,
   setRouteActive,
   setRouteQrImagePath,
+  insertUser,
+  findUserByEmail,
+  findUserById,
+  findUserByLicense,
+  updateUserLogin,
+  incrementUserResume,
+  setUserStatus,
+  upgradeUserLifetime,
+  adjustUserResumeLimit,
+  deleteUser,
+  getAllUsers,
+  getAllLicenses,
+  getAllPending,
+  getSetting,
+  setSetting,
 };

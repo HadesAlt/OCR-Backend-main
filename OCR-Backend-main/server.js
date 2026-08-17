@@ -20,13 +20,15 @@ const FRONTEND_URL = (process.env.FRONTEND_URL || 'https://resumebuilder-phi-sev
 const EXPECTED_AMOUNT = 49;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const STATS_SECRET = process.env.ADMIN_STATS_SECRET || process.env.WEBHOOK_SECRET;
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'ignite_admin_2025';
+const SESSION_SECRET = process.env.SESSION_SECRET || 'ignite_session_secret_key_2025_secure';
 
 const PAYMENT_EXPIRY_MINS = parseInt(process.env.PAYMENT_EXPIRY_MINS || '15', 10);
 /** After user submits UTR, extend DB expiry so verification is not blocked by the QR window (days). */
 const PENDING_VERIFICATION_GRACE_DAYS = parseInt(process.env.PENDING_VERIFICATION_GRACE_DAYS || '7', 10);
 
 // ── Telegram: notifications; manual review only for routes with manualVerification (Approve/Decline). ──
-const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '8028942300:AAF-3F-LZGKXKBjCmA9zoHyQf6W7g0ZC59U').trim();
+const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 const TELEGRAM_NOTIFY = process.env.TELEGRAM_NOTIFY !== '0' && process.env.TELEGRAM_NOTIFY !== 'false';
 const TELEGRAM_POLLING = process.env.TELEGRAM_POLLING !== '0' && process.env.TELEGRAM_POLLING !== 'false';
 const QR_UPLOAD_DIR = path.join('uploads', 'route-qrs');
@@ -54,6 +56,15 @@ function parseTelegramAdminUserIds() {
 const TELEGRAM_ADMIN_USER_IDS = new Set(parseTelegramAdminUserIds());
 
 const tgNotifyBot = TELEGRAM_BOT_TOKEN ? new TelegramBot(TELEGRAM_BOT_TOKEN, TELEGRAM_POLLING ? { polling: true } : undefined) : null;
+if (tgNotifyBot) {
+  tgNotifyBot.on('polling_error', (err) => {
+    // Avoid spamming logs if another bot instance is polling on the same token
+    if (err && err.code === 'ETELEGRAM' && String(err.message).includes('409 Conflict')) {
+      return;
+    }
+    console.warn('[telegram]', 'Polling issue:', err.message || err);
+  });
+}
 const pendingQrUploadByChat = new Map();
 
 const SAMRIDH_UPI_ID = (process.env.SAMRIDH_UPI_ID || 'samridhjss@oksbi').trim();
@@ -250,7 +261,7 @@ async function notifyTelegramPaymentInitiated(payload) {
 }
 
 // ── Resend Email ──
-const resend = new Resend(process.env.RESEND_API_KEY || 're_iupwZHU4_8E1YnBUCqMX28BZ2UFkmqJWt');
+const resend = new Resend(process.env.RESEND_API_KEY || '');
 
 const GMAIL_VERIFY_ENABLED = process.env.GMAIL_VERIFY !== '0' && process.env.GMAIL_VERIFY !== 'false';
 /** Optional: require FamApp receipt text to include session PAY… (UPI note). Default off — verify by UTR + ₹ only. Set GMAIL_STRICT_TXN_REF=1 to enable. */
@@ -1216,6 +1227,449 @@ app.get('/api/admin/payment-stats', statsLimiter, async (req, res) => {
     log('stats', e.message);
     return res.status(500).json({ error: 'Could not load stats' });
   }
+});
+
+/* ═══════════════════════════════════════════════════════════
+   AUTHENTICATION & USER MANAGEMENT API
+   ═══════════════════════════════════════════════════════════ */
+
+function generateSessionToken(userId, email, planType) {
+  const payload = {
+    userId,
+    email,
+    planType,
+    iat: Date.now(),
+  };
+  const str = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(str).digest('base64url');
+  return `${str}.${sig}`;
+}
+
+function verifySessionToken(token) {
+  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
+  const [str, sig] = token.split('.');
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(str).digest('base64url');
+  if (sig !== expected) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(str, 'base64url').toString('utf8'));
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+async function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required. Please sign in.' });
+  }
+  const token = authHeader.substring(7);
+  const payload = verifySessionToken(token);
+  if (!payload || !payload.userId) {
+    return res.status(401).json({ error: 'Invalid or expired session. Please sign in again.' });
+  }
+
+  const user = await db.findUserById(payload.userId);
+  if (!user) {
+    return res.status(401).json({ error: 'User account not found.' });
+  }
+
+  if (user.status === 'disabled') {
+    return res.status(403).json({ error: 'Your account has been deactivated by the administrator.' });
+  }
+
+  const isLifetime = user.planType === 'lifetime';
+  const freeAccessEnabled = (await db.getSetting('free_access_enabled', '1')) === '1';
+
+  if (!isLifetime && !freeAccessEnabled) {
+    return res.status(403).json({
+      error: 'Free access is currently paused by the administrator. Please check back later or use a Lifetime Key.',
+      freeAccessDisabled: true,
+    });
+  }
+
+  req.user = user;
+  next();
+}
+
+function adminMiddleware(req, res, next) {
+  const key = req.headers['x-admin-key'] || req.query.adminKey || req.body?.adminKey;
+  if (!key || key !== ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Unauthorized: Invalid Admin Secret Key.' });
+  }
+  next();
+}
+
+app.post('/api/auth/google', async (req, res) => {
+  const { credential, profile } = req.body;
+  let email = '';
+  let name = '';
+  let picture = '';
+
+  if (profile && profile.email) {
+    email = profile.email.trim().toLowerCase();
+    name = profile.name || '';
+    picture = profile.picture || '';
+  } else if (credential) {
+    try {
+      const parts = credential.split('.');
+      if (parts.length >= 2) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        email = (payload.email || '').trim().toLowerCase();
+        name = payload.name || '';
+        picture = payload.picture || '';
+      }
+    } catch (e) {
+      log('auth', `Error decoding Google JWT credential: ${e.message}`);
+    }
+  }
+
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Valid Google email address is required.' });
+  }
+
+  const freeAccessEnabled = (await db.getSetting('free_access_enabled', '1')) === '1';
+  let user = await db.findUserByEmail(email);
+
+  if (!user) {
+    if (!freeAccessEnabled) {
+      return res.status(403).json({
+        error: 'Registration/Sign-in for free student accounts is currently closed by the administrator.',
+      });
+    }
+
+    const userId = `usr_${crypto.randomBytes(12).toString('hex')}`;
+    const now = new Date().toISOString();
+    user = {
+      id: userId,
+      email,
+      name,
+      picture,
+      authProvider: 'google',
+      planType: 'free',
+      licenseKey: null,
+      resumesCreated: 0,
+      maxResumes: 2,
+      createdAt: now,
+      expiresAt: null,
+      status: 'active',
+      lastLoginAt: now,
+    };
+    await db.insertUser(user);
+    log('auth', `Created new free user: ${email} (ID: ${userId})`);
+  } else {
+    if (user.status === 'disabled') {
+      return res.status(403).json({ error: 'This account has been disabled by the administrator.' });
+    }
+    if (user.planType !== 'lifetime' && !freeAccessEnabled) {
+      return res.status(403).json({
+        error: 'Free access is currently paused by the administrator.',
+      });
+    }
+    const now = new Date().toISOString();
+    await db.updateUserLogin(user.id, name || user.name, picture || user.picture, now);
+    user = await db.findUserById(user.id);
+    log('auth', `User logged in via Google: ${email}`);
+  }
+
+  const token = generateSessionToken(user.id, user.email, user.planType);
+  return res.json({
+    success: true,
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      picture: user.picture,
+      planType: user.planType,
+      resumesCreated: user.resumesCreated,
+      maxResumes: user.maxResumes,
+      createdAt: user.createdAt,
+      status: user.status,
+    },
+  });
+});
+
+app.post('/api/auth/demo', async (req, res) => {
+  const { email, name } = req.body;
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Valid email address is required.' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const freeAccessEnabled = (await db.getSetting('free_access_enabled', '1')) === '1';
+  let user = await db.findUserByEmail(cleanEmail);
+
+  if (!user) {
+    if (!freeAccessEnabled) {
+      return res.status(403).json({
+        error: 'Free student access is currently paused by administrator.',
+      });
+    }
+    const userId = `usr_${crypto.randomBytes(12).toString('hex')}`;
+    const now = new Date().toISOString();
+    user = {
+      id: userId,
+      email: cleanEmail,
+      name: name || cleanEmail.split('@')[0],
+      picture: null,
+      authProvider: 'demo',
+      planType: 'free',
+      licenseKey: null,
+      resumesCreated: 0,
+      maxResumes: 2,
+      createdAt: now,
+      expiresAt: null,
+      status: 'active',
+      lastLoginAt: now,
+    };
+    await db.insertUser(user);
+    log('auth', `Created new demo user: ${cleanEmail}`);
+  } else {
+    if (user.status === 'disabled') {
+      return res.status(403).json({ error: 'This account has been disabled by administrator.' });
+    }
+    const now = new Date().toISOString();
+    await db.updateUserLogin(user.id, name || user.name, null, now);
+    user = await db.findUserById(user.id);
+  }
+
+  const token = generateSessionToken(user.id, user.email, user.planType);
+  return res.json({
+    success: true,
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      picture: user.picture,
+      planType: user.planType,
+      resumesCreated: user.resumesCreated,
+      maxResumes: user.maxResumes,
+      createdAt: user.createdAt,
+      status: user.status,
+    },
+  });
+});
+
+app.post('/api/auth/license', async (req, res) => {
+  const { licenseKey, fingerprint } = req.body;
+  if (!licenseKey) return res.status(400).json({ error: 'License key is required.' });
+
+  const cleanKey = licenseKey.trim();
+  const row = await db.findLicenseByKey(cleanKey);
+  if (!row || Number(row.active) !== 1) {
+    return res.status(401).json({ error: 'Invalid or inactive license key.' });
+  }
+
+  if (fingerprint) {
+    const cleanFp = String(fingerprint).trim().slice(0, 64);
+    if (!row.deviceFingerprint) {
+      await db.activateLicense(cleanFp, new Date().toISOString(), cleanKey);
+    } else if (row.deviceFingerprint !== cleanFp) {
+      return res.status(403).json({
+        error: 'This license is already activated on a different device. Licenses are locked to 1 device.',
+      });
+    }
+  }
+
+  let user = await db.findUserByLicense(cleanKey);
+  if (!user) {
+    const userId = `usr_${crypto.randomBytes(12).toString('hex')}`;
+    const now = new Date().toISOString();
+    user = {
+      id: userId,
+      email: row.vpa || `license_${cleanKey.slice(0, 8)}@licensed.user`,
+      name: row.fromName || 'Lifetime License User',
+      picture: null,
+      authProvider: 'license',
+      planType: 'lifetime',
+      licenseKey: cleanKey,
+      resumesCreated: 0,
+      maxResumes: 99999,
+      createdAt: now,
+      expiresAt: null,
+      status: 'active',
+      lastLoginAt: now,
+    };
+    await db.insertUser(user);
+  } else {
+    if (user.status === 'disabled') {
+      return res.status(403).json({ error: 'This license user has been disabled by administrator.' });
+    }
+    const now = new Date().toISOString();
+    await db.updateUserLogin(user.id, user.name, null, now);
+    user = await db.findUserById(user.id);
+  }
+
+  const token = generateSessionToken(user.id, user.email, 'lifetime');
+  return res.json({
+    success: true,
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      picture: user.picture,
+      planType: 'lifetime',
+      licenseKey: cleanKey,
+      resumesCreated: user.resumesCreated,
+      maxResumes: user.maxResumes || 99999,
+      createdAt: user.createdAt,
+      status: user.status,
+    },
+  });
+});
+
+app.get('/api/auth/me', authMiddleware, (req, res) => {
+  const user = req.user;
+  return res.json({
+    valid: true,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      picture: user.picture,
+      planType: user.planType,
+      licenseKey: user.licenseKey,
+      resumesCreated: user.resumesCreated,
+      maxResumes: user.maxResumes,
+      createdAt: user.createdAt,
+      expiresAt: null,
+      status: user.status,
+    },
+  });
+});
+
+app.post('/api/user/increment-resume', authMiddleware, async (req, res) => {
+  const user = req.user;
+
+  if (user.resumesCreated >= user.maxResumes) {
+    return res.status(403).json({
+      error: `Resume creation limit reached (${user.resumesCreated}/${user.maxResumes} resumes created). Each account is limited to 2 resumes. Please contact admin if you need more creations.`,
+      limitReached: true,
+      resumesCreated: user.resumesCreated,
+      maxResumes: user.maxResumes,
+    });
+  }
+
+  await db.incrementUserResume(user.id);
+  const updated = await db.findUserById(user.id);
+
+  log('resume-count', `User ${user.email} built resume #${updated.resumesCreated}/${updated.maxResumes}`);
+  return res.json({
+    success: true,
+    resumesCreated: updated.resumesCreated,
+    maxResumes: updated.maxResumes,
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════
+   ADMIN DASHBOARD API
+   ═══════════════════════════════════════════════════════════ */
+
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body;
+  if (password === ADMIN_SECRET) {
+    return res.json({ success: true, adminKey: ADMIN_SECRET });
+  }
+  return res.status(401).json({ error: 'Invalid admin secret key.' });
+});
+
+app.get('/api/admin/stats-and-users', adminMiddleware, async (req, res) => {
+  const users = await db.getAllUsers();
+  const licenses = await db.getAllLicenses();
+  const pendingPayments = await db.getAllPending();
+  const freeAccessEnabled = (await db.getSetting('free_access_enabled', '1')) === '1';
+
+  const totalUsers = users.length;
+  const activeFreeUsers = users.filter((u) => u.planType !== 'lifetime' && u.status === 'active').length;
+  const disabledUsers = users.filter((u) => u.status === 'disabled').length;
+  const lifetimeUsers = users.filter((u) => u.planType === 'lifetime').length;
+
+  return res.json({
+    stats: {
+      totalUsers,
+      activeFreeUsers,
+      disabledUsers,
+      lifetimeUsers,
+      freeAccessEnabled,
+      totalLicenses: licenses.length,
+      pendingPayments: pendingPayments.filter((p) => p.status === 'pending').length,
+    },
+    users,
+    licenses,
+    pendingPayments,
+  });
+});
+
+app.post('/api/admin/global-free-access', adminMiddleware, async (req, res) => {
+  const { enabled } = req.body;
+  const val = enabled ? '1' : '0';
+  await db.setSetting('free_access_enabled', val);
+  log('admin', `Global free access set to: ${val === '1' ? 'ENABLED' : 'PAUSED/DISABLED'}`);
+  return res.json({ success: true, freeAccessEnabled: val === '1' });
+});
+
+app.post('/api/admin/users/:id/toggle', adminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const user = await db.findUserById(id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const newStatus = user.status === 'disabled' ? 'active' : 'disabled';
+  await db.setUserStatus(id, newStatus);
+  log('admin', `User ${user.email} status toggled to: ${newStatus}`);
+  return res.json({ success: true, status: newStatus });
+});
+
+app.post('/api/admin/users/:id/upgrade-lifetime', adminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const user = await db.findUserById(id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  await db.upgradeUserLifetime(id);
+  log('admin', `User ${user.email} upgraded to Lifetime plan`);
+  return res.json({ success: true, planType: 'lifetime' });
+});
+
+app.post('/api/admin/users/:id/adjust-limit', adminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { resumesCreated, maxResumes } = req.body;
+  const user = await db.findUserById(id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  await db.adjustUserResumeLimit(
+    id,
+    resumesCreated !== undefined ? Number(resumesCreated) : user.resumesCreated,
+    maxResumes !== undefined ? Number(maxResumes) : user.maxResumes,
+  );
+  log('admin', `User ${user.email} resume limit updated to ${resumesCreated}/${maxResumes}`);
+  return res.json({ success: true });
+});
+
+app.post('/api/admin/users/:id/delete', adminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  await db.deleteUser(id);
+  log('admin', `User ${id} deleted`);
+  return res.json({ success: true });
+});
+
+app.post('/api/admin/licenses/create', adminMiddleware, async (req, res) => {
+  const { fromName, vpa } = req.body;
+  const licenseKey = `IGNITE-${crypto.randomBytes(4).toString('hex').toUpperCase()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+  const now = new Date().toISOString();
+
+  await db.insertLicenseOrIgnore({
+    licenseKey,
+    upiRef: `ADMIN-MANUAL-${Date.now()}`,
+    amount: 0,
+    fromName: fromName || 'Admin Generated',
+    vpa: vpa || 'admin@ignite',
+    issuedAt: now,
+  });
+
+  log('admin', `Admin generated new license: ${licenseKey}`);
+  return res.json({ success: true, licenseKey });
 });
 
 app.get('/', (_req, res) => res.json({

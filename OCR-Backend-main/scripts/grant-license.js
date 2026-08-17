@@ -18,7 +18,7 @@ const FRONTEND_URL = (process.env.FRONTEND_URL || 'https://resumebuilder-phi-sev
   '',
 );
 const RESEND_FROM = process.env.RESEND_FROM || 'onboarding@asdfhkll.in';
-const resend = new Resend(process.env.RESEND_API_KEY || 're_iupwZHU4_8E1YnBUCqMX28BZ2UFkmqJWt');
+const resend = new Resend(process.env.RESEND_API_KEY || '');
 
 const DEFAULT_EMAILS = [
   'bindwaljay@gmail.com',
