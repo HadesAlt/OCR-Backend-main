@@ -261,7 +261,7 @@ async function notifyTelegramPaymentInitiated(payload) {
 }
 
 // ── Resend Email ──
-const resend = new Resend(process.env.RESEND_API_KEY || '');
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 const GMAIL_VERIFY_ENABLED = process.env.GMAIL_VERIFY !== '0' && process.env.GMAIL_VERIFY !== 'false';
 /** Optional: require FamApp receipt text to include session PAY… (UPI note). Default off — verify by UTR + ₹ only. Set GMAIL_STRICT_TXN_REF=1 to enable. */
@@ -396,13 +396,21 @@ async function sendLicenseKeyEmail(row, licenseKey) {
     </div>
   </div>`;
 
-  await resend.emails.send({
-    from: 'onboarding@asdfhkll.in',
-    to: row.email,
-    subject: 'Your Resume Builder license key',
-    text: textBody,
-    html: htmlBody,
-  });
+  if (resend) {
+    try {
+      await resend.emails.send({
+        from: process.env.RESEND_FROM || 'onboarding@asdfhkll.in',
+        to: row.email,
+        subject: 'Your Resume Builder license key',
+        text: textBody,
+        html: htmlBody,
+      });
+    } catch (e) {
+      log('email', `Failed to send email to ${row.email}: ${e.message}`);
+    }
+  } else {
+    log('email', `RESEND_API_KEY not configured. License key for ${row.email}: ${licenseKey}`);
+  }
 }
 
 async function approvePendingAndEmail(row, txnId, upiRef) {
@@ -511,14 +519,16 @@ async function handleManualDecision(action, txnId, actorId) {
   }
 
   await db.declinePending(txnId);
-  try {
-    await resend.emails.send({
-      from: 'onboarding@asdfhkll.in',
-      to: row.email,
-      subject: 'Resume Builder: payment could not be verified',
-      html: `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#0a0a0a;color:#fff;border-radius:12px;"><h2 style="color:#ff6666;margin:0 0 8px;">Payment not verified</h2><p style="color:#aaa;">Hi ${escapeHtml(row.userName || 'there')}, we could not verify your payment (ref: <code>${escapeHtml(txnId)}</code>).</p><p style="color:#aaa;">If you believe this is a mistake, reply with your UTR and a payment screenshot.</p></div>`,
-    });
-  } catch (_) { }
+  if (resend) {
+    try {
+      await resend.emails.send({
+        from: process.env.RESEND_FROM || 'onboarding@asdfhkll.in',
+        to: row.email,
+        subject: 'Resume Builder: payment could not be verified',
+        html: `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#0a0a0a;color:#fff;border-radius:12px;"><h2 style="color:#ff6666;margin:0 0 8px;">Payment not verified</h2><p style="color:#aaa;">Hi ${escapeHtml(row.userName || 'there')}, we could not verify your payment (ref: <code>${escapeHtml(txnId)}</code>).</p><p style="color:#aaa;">If you believe this is a mistake, reply with your UTR and a payment screenshot.</p></div>`,
+      });
+    } catch (_) { }
+  }
   await editTelegramPaymentMessages(
     row,
     `❌ <b>Declined</b>\nSession <code>${escapeHtml(txnId)}</code>\nBy admin <code>${escapeHtml(String(actorId || 'unknown'))}</code>`,
