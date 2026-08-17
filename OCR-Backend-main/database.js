@@ -321,6 +321,13 @@ async function setRouteActive(routeKey, enabled) {
   );
 }
 
+async function setRouteQrImagePath(routeKey, qrImagePath) {
+  await pool.query(
+    'UPDATE payment_routes SET "qrImagePath" = $1, "updatedAt" = $2 WHERE "routeKey" = $3',
+    [qrImagePath, new Date().toISOString(), routeKey],
+  );
+}
+
 async function insertUser(user) {
   await pool.query(
     `INSERT INTO users ("id", "email", "name", "picture", "authProvider", "planType", "licenseKey", "resumesCreated", "maxResumes", "createdAt", "expiresAt", "status", "lastLoginAt")
