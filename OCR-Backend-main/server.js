@@ -1593,6 +1593,7 @@ app.get('/api/admin/stats-and-users', adminMiddleware, async (req, res) => {
   const freeAccessEnabled = (await db.getSetting('free_access_enabled', '1')) === '1';
 
   const totalUsers = users.length;
+  const totalResumesBuilt = users.reduce((sum, u) => sum + (Number(u.resumesCreated) || 0), 0);
   const activeFreeUsers = users.filter((u) => u.planType !== 'lifetime' && u.status === 'active').length;
   const disabledUsers = users.filter((u) => u.status === 'disabled').length;
   const lifetimeUsers = users.filter((u) => u.planType === 'lifetime').length;
@@ -1600,6 +1601,7 @@ app.get('/api/admin/stats-and-users', adminMiddleware, async (req, res) => {
   return res.json({
     stats: {
       totalUsers,
+      totalResumesBuilt,
       activeFreeUsers,
       disabledUsers,
       lifetimeUsers,
