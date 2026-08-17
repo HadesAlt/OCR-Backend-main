@@ -741,11 +741,41 @@ function setupTelegramPollingHandlers() {
 const app = express();
 
 app.set('trust proxy', 1);
-app.use(helmet());
-app.use(cors({
-  origin: [FRONTEND_URL, 'http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'],
-  credentials: true,
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  crossOriginOpenerPolicy: false,
 }));
+
+const allowedOriginsList = [
+  'https://resumebuilder.ignitepcell.com',
+  'https://resumebuilder-phi-seven.vercel.app',
+  FRONTEND_URL,
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3000',
+  'http://localhost:5174',
+];
+
+const corsMiddleware = cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (
+      allowedOriginsList.includes(origin) ||
+      /\.vercel\.app$/.test(origin) ||
+      /ignitepcell\.com$/.test(origin) ||
+      /^http:\/\/localhost:\d+$/.test(origin)
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key'],
+});
+
+app.use(corsMiddleware);
+app.options('*', corsMiddleware);
 
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: false, limit: '10kb' }));
